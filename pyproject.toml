@@ -1,0 +1,57 @@
+[project]
+name = "feedwise"
+version = "0.1.0"
+description = "智能 RSS 阅读助手 - FreshRSS 内容分析与价值排序"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "FeedWise Team" }]
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "sqlmodel>=0.0.14",
+    "aiosqlite>=0.19.0",
+    "httpx>=0.26.0",
+    "openai>=1.12.0",
+    "trafilatura>=1.6.0",
+    "apscheduler>=3.10.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.1.0",
+    "pyright>=1.1.0",
+    "httpx>=0.26.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/feedwise"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501", "B008", "RUF001", "RUF002", "RUF003"]  # B008: FastAPI Depends, RUF00x: 中文字符
+
+[tool.ruff.lint.isort]
+known-first-party = ["feedwise"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+include = ["src"]
+exclude = ["tests"]
+
