@@ -91,6 +91,109 @@ npm run dev -- --host 0.0.0.0
 
 ---
 
+## 🐳 Docker 部署（推荐）
+
+使用 Docker Compose 一键部署，无需手动安装依赖。
+
+### 1. 前置要求
+
+- Docker 20+
+- Docker Compose v2+
+
+### 2. 配置环境变量
+
+```bash
+cd feedwise
+
+# 复制配置模板
+cp .env.example .env
+
+# 编辑配置
+vim .env
+```
+
+`.env` 配置示例：
+
+```env
+# FreshRSS 配置（必填）
+FRESHRSS_URL=http://192.168.1.100:8080
+FRESHRSS_USERNAME=admin
+FRESHRSS_API_PASSWORD=your-api-password
+
+# LLM 配置
+LLM_PROVIDER=ollama
+# Docker 容器访问宿主机 Ollama 服务
+# Linux: http://172.17.0.1:11434 或 http://host.docker.internal:11434
+# macOS/Windows: http://host.docker.internal:11434
+OLLAMA_HOST=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen2.5:7b
+
+# 同步配置
+SYNC_INTERVAL_MINUTES=30
+
+# 前端 API 地址（设置为浏览器可访问的后端地址）
+VITE_API_BASE=http://192.168.1.100:8000
+```
+
+### 3. 构建并启动
+
+```bash
+# 构建并启动容器
+docker compose up -d --build
+
+# 查看运行状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f
+```
+
+### 4. 访问服务
+
+| 服务 | 地址 |
+|------|------|
+| 前端界面 | http://your-server-ip:5173 |
+| 后端 API | http://your-server-ip:8000 |
+| API 文档 | http://your-server-ip:8000/docs |
+
+### 5. 常用命令
+
+```bash
+# 停止服务
+docker compose down
+
+# 重启服务
+docker compose restart
+
+# 重新构建（配置修改后）
+docker compose up -d --build
+
+# 查看后端日志
+docker compose logs -f backend
+
+# 查看前端日志
+docker compose logs -f frontend
+```
+
+### 6. 数据持久化
+
+SQLite 数据库存储在 `./data/feedwise.db`，该目录已挂载到容器，数据会保留。
+
+```bash
+# 备份数据
+cp ./data/feedwise.db ./data/feedwise.db.backup
+```
+
+### 7. 更新部署
+
+```bash
+# 拉取最新代码后重新构建
+git pull
+docker compose up -d --build
+```
+
+---
+
 ## 📖 操作指南
 
 ### 同步文章
@@ -289,6 +392,11 @@ feedwise/
 │   │   ├── components/# UI 组件
 │   │   └── pages/     # 页面
 │   └── package.json
+├── docker/            # Docker 配置
+│   ├── backend.Dockerfile
+│   └── frontend.Dockerfile
+├── data/              # 数据目录（SQLite 数据库）
+├── docker-compose.yml # Docker 编排文件
 ├── .env.example       # 环境变量模板
 └── pyproject.toml     # Python 依赖
 ```
