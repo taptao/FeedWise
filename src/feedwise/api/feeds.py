@@ -101,3 +101,4 @@ async def set_fetch_mode(
     await session.commit()
 
     return {"id": feed_id, "fetch_full_text": mode}
+

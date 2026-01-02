@@ -41,3 +41,4 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """获取应用配置（带缓存）."""
     return Settings()
+

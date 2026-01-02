@@ -177,3 +177,4 @@ class ArticleRanker:
         score += feed_priority * 0.15
 
         return round(score, 2)
+

@@ -96,3 +96,4 @@ async def shutdown_scheduler() -> None:
         _scheduler.shutdown(wait=False)
         logger.info("定时任务调度器已关闭")
         _scheduler = None
+

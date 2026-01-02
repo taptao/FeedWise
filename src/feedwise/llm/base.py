@@ -36,3 +36,4 @@ class LLMProvider(ABC):
     def chat_stream(self, messages: list[Message]) -> AsyncIterator[str]:
         """流式对话，逐步返回响应."""
         ...
+

@@ -102,3 +102,4 @@ def estimate_reading_time(text: str, wpm: int = 200) -> int:
     word_count = count_words(text)
     minutes = max(1, round(word_count / wpm))
     return minutes
+

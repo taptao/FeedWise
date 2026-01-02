@@ -27,3 +27,4 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
     )
+
