@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from feedwise.api import analysis, articles, feeds, settings, sync
+from feedwise.api import analysis, articles, feeds, fetch, settings, sync
 from feedwise.config import get_settings
 from feedwise.models.database import init_db
 from feedwise.scheduler import create_scheduler, shutdown_scheduler
@@ -61,6 +61,7 @@ app.add_middleware(
 app.include_router(articles.router)
 app.include_router(feeds.router)
 app.include_router(analysis.router)
+app.include_router(fetch.router)
 app.include_router(sync.router)
 app.include_router(settings.router)
 
@@ -90,4 +91,3 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
-

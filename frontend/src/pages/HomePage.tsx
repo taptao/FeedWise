@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpDown, Sparkles, Loader2 } from 'lucide-react';
+import { ArrowUpDown, Sparkles, Download } from 'lucide-react';
 import { api } from '../api/client';
+import type { TaskStats, TaskProgress } from '../api/client';
 import { ArticleCard } from '../components/ArticleCard';
 import { Sidebar } from '../components/Sidebar';
+import { TaskCard } from '../components/TaskCard';
 import { cn } from '../lib/utils';
 
 type SortOption = 'value' | 'date' | 'feed';
@@ -14,52 +16,166 @@ export function HomePage() {
   const [filter, setFilter] = useState<FilterOption>('unread');
   const [selectedFeed, setSelectedFeed] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [batchAnalyzing, setBatchAnalyzing] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{ total: number; completed: number } | null>(null);
   const queryClient = useQueryClient();
+
+  // 抓取状态
+  const [fetchStats, setFetchStats] = useState<TaskStats | null>(null);
+  const [fetchProgress, setFetchProgress] = useState<TaskProgress | null>(null);
+  const [isFetching, setIsFetching] = useState(false);
+
+  // 分析状态
+  const [analysisStats, setAnalysisStats] = useState<TaskStats | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState<TaskProgress | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['articles', { sort, filter, feed_id: selectedFeed, page }],
     queryFn: () => api.articles.list({ sort, filter, feed_id: selectedFeed || undefined, page, limit: 20 }),
   });
 
-  // 批量分析
-  const handleBatchAnalysis = async () => {
-    if (batchAnalyzing) return;
+  // 初始加载统计
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const [fetchStatsData, analysisStatsData] = await Promise.all([
+          api.fetch.stats(),
+          api.analysis.stats(),
+        ]);
+        setFetchStats(fetchStatsData);
+        setAnalysisStats(analysisStatsData);
+      } catch (err) {
+        console.error('Failed to load stats:', err);
+      }
+    };
+    loadStats();
+  }, []);
+
+  // 刷新统计
+  const refreshStats = async () => {
+    try {
+      const [fetchStatsData, analysisStatsData] = await Promise.all([
+        api.fetch.stats(),
+        api.analysis.stats(),
+      ]);
+      setFetchStats(fetchStatsData);
+      setAnalysisStats(analysisStatsData);
+    } catch (err) {
+      console.error('Failed to refresh stats:', err);
+    }
+  };
+
+  // 抓取处理
+  const handleFetchBatch = async () => {
+    if (isFetching) return;
     
-    setBatchAnalyzing(true);
-    setBatchProgress(null);
+    setIsFetching(true);
+    setFetchProgress(null);
+    
+    try {
+      const result = await api.fetch.batch(20);
+      if (result.count === 0) {
+        setIsFetching(false);
+        return;
+      }
+      
+      // 轮询检查进度
+      const checkProgress = async () => {
+        try {
+          const progress = await api.fetch.progress();
+          setFetchProgress(progress);
+          
+          if (progress.status === 'idle') {
+            setIsFetching(false);
+            setFetchProgress(null);
+            refreshStats();
+            queryClient.invalidateQueries({ queryKey: ['articles'] });
+          } else {
+            setTimeout(checkProgress, 2000);
+          }
+        } catch {
+          setIsFetching(false);
+          setFetchProgress(null);
+        }
+      };
+      
+      setTimeout(checkProgress, 1000);
+    } catch (err) {
+      console.error('Batch fetch failed:', err);
+      setIsFetching(false);
+      setFetchProgress(null);
+    }
+  };
+
+  // 抓取重试
+  const handleFetchRetry = async () => {
+    if (isFetching) return;
+    
+    try {
+      await api.fetch.retry();
+      handleFetchBatch();
+    } catch (err) {
+      console.error('Fetch retry failed:', err);
+    }
+  };
+
+  // 分析处理
+  const handleBatchAnalysis = async () => {
+    if (isAnalyzing) return;
+    
+    setIsAnalyzing(true);
+    setAnalysisProgress(null);
     
     try {
       const result = await api.analysis.batch(20);
       if (result.count === 0) {
-        alert('没有需要分析的文章');
-        setBatchAnalyzing(false);
+        setIsAnalyzing(false);
         return;
       }
       
-      setBatchProgress({ total: result.count, completed: 0 });
+      setAnalysisProgress({ status: 'running', total: result.count, completed: 0 });
       
       // 轮询检查进度
       const checkProgress = async () => {
-        const status = await api.analysis.batchStatus(result.batch_id);
-        setBatchProgress({ total: status.total, completed: status.completed });
-        
-        if (status.status === 'completed') {
-          setBatchAnalyzing(false);
-          setBatchProgress(null);
-          // 刷新文章列表
-          queryClient.invalidateQueries({ queryKey: ['articles'] });
-        } else {
-          setTimeout(checkProgress, 2000);
+        try {
+          const status = await api.analysis.batchStatus(result.batch_id);
+          setAnalysisProgress({ 
+            status: status.status as 'idle' | 'running', 
+            total: status.total, 
+            completed: status.completed,
+            failed: status.failed,
+          });
+          
+          if (status.status === 'completed') {
+            setIsAnalyzing(false);
+            setAnalysisProgress(null);
+            refreshStats();
+            queryClient.invalidateQueries({ queryKey: ['articles'] });
+          } else {
+            setTimeout(checkProgress, 2000);
+          }
+        } catch {
+          setIsAnalyzing(false);
+          setAnalysisProgress(null);
         }
       };
       
       setTimeout(checkProgress, 2000);
     } catch (err) {
       console.error('Batch analysis failed:', err);
-      setBatchAnalyzing(false);
-      setBatchProgress(null);
+      setIsAnalyzing(false);
+      setAnalysisProgress(null);
+    }
+  };
+
+  // 分析重试
+  const handleAnalysisRetry = async () => {
+    if (isAnalyzing) return;
+    
+    try {
+      await api.analysis.retry();
+      handleBatchAnalysis();
+    } catch (err) {
+      console.error('Analysis retry failed:', err);
     }
   };
 
@@ -81,6 +197,30 @@ export function HomePage() {
 
       {/* Main Content */}
       <div className="flex-1 py-6 pr-4">
+        {/* Task Cards */}
+        <div className="flex gap-4 mb-6">
+          <TaskCard
+            title="全文抓取"
+            icon={<Download className="h-4 w-4" />}
+            stats={fetchStats}
+            progress={fetchProgress}
+            isRunning={isFetching}
+            colorClass="from-blue-500 to-cyan-500"
+            onStart={handleFetchBatch}
+            onRetry={handleFetchRetry}
+          />
+          <TaskCard
+            title="AI 分析"
+            icon={<Sparkles className="h-4 w-4" />}
+            stats={analysisStats}
+            progress={analysisProgress}
+            isRunning={isAnalyzing}
+            colorClass="from-purple-500 to-pink-500"
+            onStart={handleBatchAnalysis}
+            onRetry={handleAnalysisRetry}
+          />
+        </div>
+
         {/* Toolbar */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -94,54 +234,25 @@ export function HomePage() {
             )}
           </div>
 
-          {/* Batch Analysis & Sort */}
-          <div className="flex items-center gap-4">
-            {/* Batch Analysis Button */}
-            <button
-              onClick={handleBatchAnalysis}
-              disabled={batchAnalyzing}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
-                batchAnalyzing
-                  ? "bg-muted text-muted-foreground cursor-not-allowed"
-                  : "bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-              )}
-            >
-              {batchAnalyzing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {batchProgress
-                    ? `分析中 ${batchProgress.completed}/${batchProgress.total}`
-                    : '启动中...'}
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4" />
-                  AI 批量分析
-                </>
-              )}
-            </button>
-
-            {/* Sort Options */}
-            <div className="flex items-center gap-2">
-              <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-              <div className="flex rounded-md border">
-                {sortOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => setSort(option.value)}
-                    className={cn(
-                      "px-3 py-1.5 text-sm transition-colors",
-                      "first:rounded-l-md last:rounded-r-md",
-                      sort === option.value
-                        ? "bg-primary text-primary-foreground"
-                        : "hover:bg-accent"
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+          {/* Sort Options */}
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+            <div className="flex rounded-md border">
+              {sortOptions.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setSort(option.value)}
+                  className={cn(
+                    "px-3 py-1.5 text-sm transition-colors",
+                    "first:rounded-l-md last:rounded-r-md",
+                    sort === option.value
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-accent"
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -203,4 +314,3 @@ export function HomePage() {
     </div>
   );
 }
-

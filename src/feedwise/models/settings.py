@@ -13,4 +13,3 @@ class SettingItem(SQLModel, table=True):
     key: str = Field(primary_key=True, description="配置键")
     value: str = Field(description="配置值")
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-

@@ -66,4 +66,3 @@ class OllamaProvider(LLMProvider):
                         yield content
                     if data.get("done", False):
                         break
-

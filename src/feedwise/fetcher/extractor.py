@@ -77,4 +77,3 @@ class FullTextExtractor:
         """批量抓取多个 URL."""
         tasks = [self.fetch(url) for url in urls]
         return await asyncio.gather(*tasks)
-

@@ -230,6 +230,126 @@ async def _run_batch_analysis(batch_id: str, article_ids: list[str]) -> None:
     _batch_status[batch_id]["status"] = "completed"
 
 
+@router.get("/stats")
+async def get_analysis_stats(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, int]:
+    """获取分析状态统计."""
+    # 已分析的文章
+    analyzed_stmt = select(ArticleAnalysis)
+    analyzed_result = await session.execute(analyzed_stmt)
+    analyzed_count = len(analyzed_result.scalars().all())
+
+    # 总文章数（有内容可分析的）
+    total_stmt = (
+        select(Article)
+        .where(Article.content_text.isnot(None))
+        .where(Article.content_text != "")
+    )
+    total_result = await session.execute(total_stmt)
+    total_count = len(total_result.scalars().all())
+
+    # 未分析的 = 总数 - 已分析
+    pending_count = max(0, total_count - analyzed_count)
+
+    # 失败数（summary 为空或为默认错误信息的）
+    failed_stmt = select(ArticleAnalysis).where(
+        ArticleAnalysis.summary.like("%分析失败%")
+    )
+    failed_result = await session.execute(failed_stmt)
+    failed_count = len(failed_result.scalars().all())
+
+    return {
+        "pending": pending_count,
+        "completed": analyzed_count - failed_count,
+        "failed": failed_count,
+        "total": total_count,
+    }
+
+
+@router.get("/failed")
+async def get_failed_analysis(
+    page: int = 1,
+    limit: int = 20,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """获取分析失败的文章列表."""
+    from feedwise.models.feed import Feed
+
+    # 查询失败的分析
+    failed_stmt = select(ArticleAnalysis).where(
+        ArticleAnalysis.summary.like("%分析失败%")
+    )
+    failed_result = await session.execute(failed_stmt)
+    all_failed = failed_result.scalars().all()
+    total = len(all_failed)
+
+    # 分页
+    offset = (page - 1) * limit
+    paginated = all_failed[offset : offset + limit]
+
+    items: list[dict] = []
+    for analysis in paginated:
+        article = await session.get(Article, analysis.article_id)
+        if article:
+            feed = await session.get(Feed, article.feed_id)
+            items.append(
+                {
+                    "article_id": analysis.article_id,
+                    "title": article.title,
+                    "url": article.url,
+                    "feed_title": feed.title if feed else "未知来源",
+                    "error": "AI 分析失败",
+                }
+            )
+
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "items": items,
+    }
+
+
+@router.post("/retry")
+async def retry_failed_analysis(
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """重试失败的分析."""
+    # 查询失败的分析
+    failed_stmt = select(ArticleAnalysis).where(
+        ArticleAnalysis.summary.like("%分析失败%")
+    )
+    failed_result = await session.execute(failed_stmt)
+    failed_analyses = failed_result.scalars().all()
+
+    if not failed_analyses:
+        return {"message": "没有失败的分析需要重试", "reset_count": 0}
+
+    # 删除失败的分析记录，让它们重新变成"待分析"
+    article_ids = [a.article_id for a in failed_analyses]
+    for analysis in failed_analyses:
+        await session.delete(analysis)
+    await session.commit()
+
+    # 触发批量分析
+    batch_id = f"batch_{int(asyncio.get_event_loop().time())}"
+    _batch_status[batch_id] = {
+        "total": len(article_ids),
+        "completed": 0,
+        "failed": 0,
+        "status": "running",
+    }
+    background_tasks.add_task(_run_batch_analysis, batch_id, article_ids)
+
+    return {
+        "reset_count": len(article_ids),
+        "batch_id": batch_id,
+        "message": f"已重置 {len(article_ids)} 篇文章，开始重新分析",
+    }
+
+
 @router.get("/stream/{article_id}")
 async def stream_analysis(
     article_id: str,

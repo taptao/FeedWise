@@ -8,6 +8,45 @@ from feedwise.config import Settings
 
 logger = logging.getLogger(__name__)
 
+
+async def fetch_task(settings: Settings) -> None:
+    """全文抓取任务：处理 pending 状态的文章."""
+    from feedwise.core.fetch_runner import FetchTaskRunner, get_current_batch_id
+    from feedwise.models.database import get_session
+
+    if not settings.fetch_enabled:
+        logger.info("全文抓取已禁用，跳过")
+        return
+
+    # 检查是否已有任务在运行
+    if get_current_batch_id():
+        logger.info("已有抓取任务在运行，跳过本次调度")
+        return
+
+    logger.info("开始全文抓取任务...")
+
+    async for session in get_session():
+        runner = FetchTaskRunner(session)
+
+        # 检查是否有待抓取文章
+        pending_count = await runner.get_pending_count()
+        if pending_count == 0:
+            logger.info("没有待抓取的文章")
+            return
+
+        # 执行批量抓取
+        status = await runner.run_batch(
+            batch_size=settings.fetch_batch_size,
+            concurrency=settings.fetch_concurrency,
+        )
+
+        logger.info(
+            f"全文抓取完成: 成功={status.completed}, "
+            f"失败={status.failed}, 跳过={status.skipped}"
+        )
+        break  # 只需要一个会话
+
+
 _scheduler: AsyncIOScheduler | None = None
 
 
@@ -55,30 +94,40 @@ async def sync_task(settings: Settings) -> None:
         await client.close()
 
 
+async def sync_and_fetch_task(settings: Settings) -> None:
+    """同步并抓取任务：同步后自动触发全文抓取."""
+    await sync_task(settings)
+    # 同步完成后，等待一小段时间再开始抓取
+    import asyncio
+
+    await asyncio.sleep(2)
+    await fetch_task(settings)
+
+
 def create_scheduler(settings: Settings) -> AsyncIOScheduler:
     """创建并启动定时任务调度器."""
     global _scheduler
 
     _scheduler = AsyncIOScheduler()
 
-    # 添加同步任务
+    # 添加同步+抓取任务（同步后自动抓取）
     _scheduler.add_job(
-        sync_task,
+        sync_and_fetch_task,
         "interval",
         minutes=settings.sync_interval_minutes,
         args=[settings],
-        id="sync_task",
-        name="FreshRSS 同步任务",
+        id="sync_fetch_task",
+        name="FreshRSS 同步+全文抓取",
         replace_existing=True,
     )
 
-    # 启动时立即执行一次
+    # 启动时立即执行一次同步+抓取
     _scheduler.add_job(
-        sync_task,
+        sync_and_fetch_task,
         "date",  # 一次性任务
         args=[settings],
-        id="sync_task_initial",
-        name="初始同步",
+        id="sync_fetch_task_initial",
+        name="初始同步+抓取",
     )
 
     _scheduler.start()
@@ -96,4 +145,3 @@ async def shutdown_scheduler() -> None:
         _scheduler.shutdown(wait=False)
         logger.info("定时任务调度器已关闭")
         _scheduler = None
-

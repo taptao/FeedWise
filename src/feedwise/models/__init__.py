@@ -16,4 +16,3 @@ __all__ = [
     "get_session",
     "init_db",
 ]
-

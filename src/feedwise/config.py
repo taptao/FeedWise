@@ -36,9 +36,14 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./feedwise.db"
     sync_interval_minutes: int = 30
 
+    # 全文抓取配置
+    fetch_enabled: bool = True
+    fetch_concurrency: int = 4
+    fetch_batch_size: int = 20
+    fetch_timeout_seconds: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:
     """获取应用配置（带缓存）."""
     return Settings()
-

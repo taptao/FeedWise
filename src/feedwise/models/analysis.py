@@ -24,4 +24,3 @@ class ArticleAnalysis(SQLModel, table=True):
     tags: str | None = Field(default=None, description="AI 生成标签 (JSON 数组)")
     model_used: str | None = Field(default=None, description="使用的模型")
     analyzed_at: datetime = Field(default_factory=datetime.utcnow)
-

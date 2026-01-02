@@ -74,9 +74,8 @@ class SyncService:
                 # 提取纯文本
                 article.content_text = html_to_text(article.content or "")
 
-                # 暂时跳过全文抓取（避免卡住）
-                # TODO: 改为后台异步抓取
-                article.fetch_status = "skipped"
+                # 设置为 pending，由后台任务处理全文抓取
+                article.fetch_status = "pending"
 
                 self.session.add(article)
                 fetched_count += 1

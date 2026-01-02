@@ -86,6 +86,36 @@ interface Settings {
   sync_interval_minutes: number;
 }
 
+// 任务统计类型
+interface TaskStats {
+  pending: number;
+  completed: number;
+  failed: number;
+  total: number;
+}
+
+// 任务进度类型
+interface TaskProgress {
+  batch_id?: string;
+  status: 'idle' | 'running';
+  total?: number;
+  completed?: number;
+  failed?: number;
+  skipped?: number;
+  current_item?: string;
+  last_batch_id?: string;
+  last_completed_at?: string;
+}
+
+// 失败项类型
+interface FailedItem {
+  article_id: string;
+  title: string;
+  url: string | null;
+  feed_title: string;
+  error: string;
+}
+
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -174,6 +204,51 @@ export const api = {
       fetchApi<{ total: number; completed: number; failed: number; status: string }>(
         `/api/analysis/batch/${batchId}`
       ),
+
+    // 新增：统计信息
+    stats: () => fetchApi<TaskStats>('/api/analysis/stats'),
+
+    // 新增：失败列表
+    failed: (page = 1, limit = 20) =>
+      fetchApi<{ total: number; page: number; limit: number; items: FailedItem[] }>(
+        `/api/analysis/failed?page=${page}&limit=${limit}`
+      ),
+
+    // 新增：重试失败
+    retry: () =>
+      fetchApi<{ reset_count: number; batch_id: string; message: string }>(
+        '/api/analysis/retry',
+        { method: 'POST' }
+      ),
+  },
+
+  // 新增：全文抓取模块
+  fetch: {
+    // 获取统计信息
+    stats: () => fetchApi<TaskStats>('/api/fetch/stats'),
+
+    // 获取当前进度
+    progress: () => fetchApi<TaskProgress>('/api/fetch/progress'),
+
+    // 获取失败列表
+    failed: (page = 1, limit = 20) =>
+      fetchApi<{ total: number; page: number; limit: number; items: FailedItem[] }>(
+        `/api/fetch/failed?page=${page}&limit=${limit}`
+      ),
+
+    // 触发批量抓取
+    batch: (limit = 20) =>
+      fetchApi<{ batch_id: string; message: string; count: number }>(
+        `/api/fetch/batch?limit=${limit}`,
+        { method: 'POST' }
+      ),
+
+    // 重试失败
+    retry: () =>
+      fetchApi<{ reset_count: number; message: string }>(
+        '/api/fetch/retry',
+        { method: 'POST' }
+      ),
   },
 
   sync: {
@@ -200,5 +275,5 @@ export const api = {
   },
 };
 
-export type { Article, ArticleDetail, Feed, FeedsResponse, AnalysisResult, Settings };
+export type { Article, ArticleDetail, Feed, FeedsResponse, AnalysisResult, Settings, TaskStats, TaskProgress, FailedItem };
 

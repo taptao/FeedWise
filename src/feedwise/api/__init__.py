@@ -3,4 +3,3 @@
 from feedwise.api import analysis, articles, feeds, settings, sync
 
 __all__ = ["analysis", "articles", "feeds", "settings", "sync"]
-

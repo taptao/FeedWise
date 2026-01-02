@@ -16,7 +16,9 @@ class Feed(SQLModel, table=True):
     site_url: str | None = Field(default=None, description="网站 URL")
     icon_url: str | None = Field(default=None, description="图标 URL")
     category: str | None = Field(default=None, description="分类")
-    fetch_full_text: str = Field(default="auto", description="全文抓取策略: auto|always|never")
+    fetch_full_text: str = Field(
+        default="auto", description="全文抓取策略: auto|always|never"
+    )
     priority: int = Field(default=5, ge=1, le=10, description="用户自定义优先级")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
