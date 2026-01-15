@@ -21,7 +21,15 @@ class Article(SQLModel, table=True):
     content_source: str = Field(default="feed", description="内容来源: feed|fetched")
     fetch_status: str | None = Field(
         default=None,
-        description="全文抓取状态: pending|success|failed|skipped",
+        description="全文抓取状态: pending|success|failed|skipped (deprecated)",
+    )
+    process_status: str = Field(
+        default="synced",
+        description="处理状态: synced|pending_fetch|fetching|pending_analysis|analyzing|done|failed",
+    )
+    process_error: str | None = Field(default=None, description="处理错误信息")
+    process_stage: str | None = Field(
+        default=None, description="失败阶段: fetch|analysis"
     )
     published_at: datetime | None = Field(default=None, description="发布时间")
     fetched_at: datetime = Field(

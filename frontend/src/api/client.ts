@@ -37,6 +37,7 @@ interface Article {
 interface ArticleDetail extends Article {
   content: string | null;
   content_html: string | null;
+  full_content: string | null;
   feed_id: string;
 }
 
@@ -114,6 +115,27 @@ interface FailedItem {
   url: string | null;
   feed_title: string;
   error: string;
+  stage?: string;
+}
+
+// 统一处理进度类型
+interface ProcessProgress {
+  status: 'idle' | 'running' | 'paused';
+  total: number;
+  completed: number;
+  failed: number;
+  current_article: string | null;
+  current_stage: string | null;
+  started_at: string | null;
+}
+
+// 统一处理统计类型
+interface ProcessStats {
+  pending: number;
+  processing: number;
+  done: number;
+  failed: number;
+  total: number;
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -251,6 +273,62 @@ export const api = {
       ),
   },
 
+  // 统一处理模块 (新)
+  process: {
+    // 获取统计信息
+    stats: () => fetchApi<ProcessStats>('/api/process/stats'),
+
+    // 获取当前进度
+    progress: () => fetchApi<ProcessProgress>('/api/process/progress'),
+
+    // 启动处理
+    start: (batchSize = 50) =>
+      fetchApi<{ message: string; status: string }>(
+        `/api/process/start?batch_size=${batchSize}`,
+        { method: 'POST' }
+      ),
+
+    // 暂停处理
+    pause: () =>
+      fetchApi<{ message: string; status: string }>(
+        '/api/process/pause',
+        { method: 'POST' }
+      ),
+
+    // 恢复处理
+    resume: () =>
+      fetchApi<{ message: string; status: string }>(
+        '/api/process/resume',
+        { method: 'POST' }
+      ),
+
+    // 停止处理
+    stop: () =>
+      fetchApi<{ message: string; status: string }>(
+        '/api/process/stop',
+        { method: 'POST' }
+      ),
+
+    // 获取失败列表
+    failed: (page = 1, limit = 20) =>
+      fetchApi<{ total: number; page: number; limit: number; items: FailedItem[] }>(
+        `/api/process/failed?page=${page}&limit=${limit}`
+      ),
+
+    // 重试失败
+    retry: () =>
+      fetchApi<{ message: string; reset_count: number }>(
+        '/api/process/retry',
+        { method: 'POST' }
+      ),
+
+    // WebSocket URL
+    wsUrl: () => {
+      const wsBase = API_BASE.replace(/^http/, 'ws');
+      return `${wsBase}/api/process/ws`;
+    },
+  },
+
   sync: {
     trigger: () => fetchApi<SyncResult>('/api/sync', { method: 'POST' }),
 
@@ -275,5 +353,5 @@ export const api = {
   },
 };
 
-export type { Article, ArticleDetail, Feed, FeedsResponse, AnalysisResult, Settings, TaskStats, TaskProgress, FailedItem };
+export type { Article, ArticleDetail, Feed, FeedsResponse, AnalysisResult, Settings, TaskStats, TaskProgress, FailedItem, ProcessProgress, ProcessStats };
 
