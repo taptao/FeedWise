@@ -20,5 +20,7 @@ class Feed(SQLModel, table=True):
         default="auto", description="全文抓取策略: auto|always|never"
     )
     priority: int = Field(default=5, ge=1, le=10, description="用户自定义优先级")
+    likes_count: int = Field(default=0, description="喜欢数")
+    dislikes_count: int = Field(default=0, description="不喜欢数")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

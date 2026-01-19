@@ -12,6 +12,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/feedwise.db
+      - OLLAMA_HOST=http://host.docker.internal:11434
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

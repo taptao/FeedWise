@@ -390,3 +390,77 @@ async def stream_analysis(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post("/deep-summary")
+async def generate_deep_summary(
+    request: dict,
+) -> dict:
+    """生成深度阅读总结，帮助快速理解文章主旨."""
+    from feedwise.config import get_effective_setting
+
+    article_id = request.get("article_id")
+    content = request.get("content", "")
+    title = request.get("title", "")
+
+    if not content:
+        raise HTTPException(status_code=400, detail="缺少文章内容")
+
+    # 限制内容长度
+    max_len = 10000
+    if len(content) > max_len:
+        content = content[:max_len] + "\n\n[内容已截断...]"
+
+    # 获取 LLM 配置
+    settings = get_settings()
+    llm_provider = str(get_effective_setting("llm_provider") or settings.llm_provider)
+    ollama_host = str(get_effective_setting("ollama_host") or settings.ollama_host)
+    ollama_model = str(get_effective_setting("ollama_model") or settings.ollama_model)
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Deep summary using: provider={llm_provider}, host={ollama_host}, model={ollama_model}")
+
+    if llm_provider == "ollama":
+        from feedwise.llm.base import LLMConfig
+        from feedwise.llm.ollama import OllamaProvider
+
+        config = LLMConfig(model=ollama_model)
+        provider = OllamaProvider(config=config, host=ollama_host)
+    else:
+        provider = create_llm_provider(settings)
+
+    # 深度总结 prompt - 生成精华阅读版
+    deep_prompt = f"""请为以下文章生成一份"精华阅读版"，让读者无需阅读全文就能掌握核心内容。
+
+要求：
+1. 保留文章的所有关键信息、核心观点和重要数据
+2. 删除冗余描述、过渡语句和重复内容
+3. 保持逻辑结构清晰，按原文顺序组织
+4. 如果是技术文章，保留关键概念和实现要点
+5. 如果是新闻/科普，保留核心事实和重要细节
+6. 使用文章原语言
+7. 篇幅控制在原文的 30-50%
+
+**标题**：{title}
+
+**正文**：
+{content}
+
+请直接输出精华版内容，保持段落结构，不要添加"精华版"等标题。"""
+
+    from feedwise.llm.base import Message
+
+    messages = [
+        Message(role="user", content=deep_prompt),
+    ]
+
+    try:
+        response = await provider.chat(messages)
+        # 移除可能的 <think> 标签
+        import re
+
+        response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+        return {"summary": response, "article_id": article_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成失败: {e!s}") from None

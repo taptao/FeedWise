@@ -29,6 +29,7 @@ env/
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 *~
@@ -69,6 +70,5 @@ Thumbs.db
 
 # Project specific
 feedwise.db
-
 
 

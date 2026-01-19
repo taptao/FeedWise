@@ -1,7 +1,25 @@
 import { useQuery } from '@tanstack/react-query';
-import { Folder, Rss, Star, Inbox } from 'lucide-react';
+import { Folder, Rss, Star, Inbox, History, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { cn } from '../lib/utils';
+
+// 最近浏览记录类型
+interface RecentArticle {
+  id: string;
+  title: string;
+  viewedAt: number;
+}
+
+// 获取最近浏览记录
+function getRecentArticles(): RecentArticle[] {
+  try {
+    const data = localStorage.getItem('recentArticles');
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
 
 interface SidebarProps {
   selectedFeed: string | null;
@@ -20,6 +38,8 @@ export function Sidebar({
     queryKey: ['feeds'],
     queryFn: api.feeds.list,
   });
+
+  const recentArticles = getRecentArticles().slice(0, 5);
 
   const filterItems = [
     { id: 'unread', label: '未读', icon: Inbox },
@@ -51,6 +71,28 @@ export function Sidebar({
           ))}
         </div>
 
+        {/* Recent Articles */}
+        {recentArticles.length > 0 && (
+          <div className="mb-6">
+            <div className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground uppercase">
+              <History className="h-3 w-3" />
+              最近浏览
+            </div>
+            <div className="space-y-1">
+              {recentArticles.map((article) => (
+                <Link
+                  key={article.id}
+                  to={`/article/${encodeURIComponent(article.id)}`}
+                  className="block w-full px-3 py-2 rounded-md text-sm hover:bg-accent transition-colors text-left truncate"
+                  title={article.title}
+                >
+                  {article.title}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Feeds by Category */}
         {feedsData?.categories && Object.entries(feedsData.categories).map(([category, feeds]) => (
           <div key={category} className="mb-4">
@@ -77,7 +119,23 @@ export function Sidebar({
                   ) : (
                     <Rss className="h-4 w-4 text-muted-foreground" />
                   )}
-                  <span className="truncate">{feed.title}</span>
+                  <span className="truncate flex-1">{feed.title}</span>
+                  {(feed.likes_count > 0 || feed.dislikes_count > 0) && (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      {feed.likes_count > 0 && (
+                        <span className="flex items-center text-green-500">
+                          <ThumbsUp className="h-3 w-3 mr-0.5" />
+                          {feed.likes_count}
+                        </span>
+                      )}
+                      {feed.dislikes_count > 0 && (
+                        <span className="flex items-center text-red-500">
+                          <ThumbsDown className="h-3 w-3 mr-0.5" />
+                          {feed.dislikes_count}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

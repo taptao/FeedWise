@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """应用配置."""
+    """应用配置（环境变量）."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -43,7 +43,36 @@ class Settings(BaseSettings):
     fetch_timeout_seconds: int = 30
 
 
+# 动态配置缓存
+_dynamic_settings: dict[str, str | int | None] | None = None
+
+
+def set_dynamic_settings(settings_dict: dict[str, str | int | None]) -> None:
+    """设置动态配置缓存."""
+    global _dynamic_settings
+    _dynamic_settings = settings_dict
+
+
+def clear_dynamic_settings() -> None:
+    """清除动态配置缓存."""
+    global _dynamic_settings
+    _dynamic_settings = None
+
+
 @lru_cache
 def get_settings() -> Settings:
     """获取应用配置（带缓存）."""
     return Settings()
+
+
+def get_effective_setting(key: str) -> str | int | None:
+    """获取有效配置值（动态配置优先）."""
+    # 优先使用动态配置
+    if _dynamic_settings and key in _dynamic_settings:
+        value = _dynamic_settings.get(key)
+        if value is not None:
+            return value
+
+    # fallback 到环境变量配置
+    settings = get_settings()
+    return getattr(settings, key, None)

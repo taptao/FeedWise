@@ -5,6 +5,7 @@ interface ArticleListParams {
   filter?: 'unread' | 'starred' | 'all';
   feed_id?: string;
   min_score?: number;
+  tag?: string;
   page?: number;
   limit?: number;
 }
@@ -39,6 +40,7 @@ interface ArticleDetail extends Article {
   content_html: string | null;
   full_content: string | null;
   feed_id: string;
+  user_rating: number | null;
 }
 
 interface Feed {
@@ -49,6 +51,8 @@ interface Feed {
   icon_url: string | null;
   priority: number;
   fetch_full_text: string;
+  likes_count: number;
+  dislikes_count: number;
 }
 
 interface FeedsResponse {
@@ -85,6 +89,7 @@ interface Settings {
   ollama_model: string;
   llm_configured: boolean;
   sync_interval_minutes: number;
+  analysis_prompt_criteria: string | null;
 }
 
 // 任务统计类型
@@ -129,12 +134,14 @@ interface ProcessProgress {
   started_at: string | null;
 }
 
-// 统一处理统计类型
+// 统一处理统计类型 - 流水线阶段
 interface ProcessStats {
-  pending: number;
-  processing: number;
-  done: number;
-  failed: number;
+  synced: number;  // 待抓取
+  fetching: number;  // 抓取中
+  pending_analysis: number;  // 待分析
+  analyzing: number;  // 分析中
+  done: number;  // 已完成
+  failed: number;  // 失败
   total: number;
 }
 
@@ -163,6 +170,7 @@ export const api = {
       if (params.filter) searchParams.set('filter', params.filter);
       if (params.feed_id) searchParams.set('feed_id', params.feed_id);
       if (params.min_score !== undefined) searchParams.set('min_score', String(params.min_score));
+      if (params.tag) searchParams.set('tag', params.tag);
       if (params.page) searchParams.set('page', String(params.page));
       if (params.limit) searchParams.set('limit', String(params.limit));
       
@@ -170,6 +178,8 @@ export const api = {
         `/api/articles?${searchParams.toString()}`
       );
     },
+
+    tags: () => fetchApi<{ tags: { name: string; count: number }[] }>('/api/articles/tags'),
 
     get: (id: string) => fetchApi<ArticleDetail>(`/api/articles/detail?article_id=${encodeURIComponent(id)}`),
 
@@ -186,6 +196,11 @@ export const api = {
     fetchFull: (id: string) =>
       fetchApi<{ success: boolean; content?: string; error?: string }>(
         `/api/articles/fetch-full?article_id=${encodeURIComponent(id)}`,
+        { method: 'POST' }
+      ),
+    rate: (id: string, rating: number) =>
+      fetchApi<{ id: string; user_rating: number | null; feed_likes: number; feed_dislikes: number }>(
+        `/api/articles/rate?article_id=${encodeURIComponent(id)}&rating=${rating}`,
         { method: 'POST' }
       ),
   },
@@ -340,6 +355,12 @@ export const api = {
 
   settings: {
     get: () => fetchApi<Settings>('/api/settings'),
+
+    update: (data: Partial<Settings>) =>
+      fetchApi<{ success: boolean; message: string }>('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
 
     testFreshRSS: () =>
       fetchApi<{ success: boolean; message: string }>('/api/settings/test-freshrss', {

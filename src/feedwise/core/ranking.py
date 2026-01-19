@@ -23,6 +23,7 @@ class ArticleRanker:
         filter_by: Literal["unread", "starred", "all"] = "unread",
         feed_id: str | None = None,
         min_score: float | None = None,
+        tag: str | None = None,
         page: int = 1,
         limit: int = 20,
     ) -> tuple[list[dict], int]:
@@ -56,6 +57,10 @@ class ArticleRanker:
         if min_score is not None:
             stmt = stmt.where(ArticleAnalysis.value_score >= min_score)
 
+        # 按标签筛选（tags 是 JSON 数组字符串）
+        if tag:
+            stmt = stmt.where(ArticleAnalysis.tags.contains(f'"{tag}"'))
+
         # 计算总数
         count_stmt = select(Article.id).outerjoin(
             ArticleAnalysis,
@@ -69,6 +74,8 @@ class ArticleRanker:
             count_stmt = count_stmt.where(Article.feed_id == feed_id)
         if min_score is not None:
             count_stmt = count_stmt.where(ArticleAnalysis.value_score >= min_score)
+        if tag:
+            count_stmt = count_stmt.where(ArticleAnalysis.tags.contains(f'"{tag}"'))
 
         count_result = await self.session.execute(count_stmt)
         total = len(count_result.all())

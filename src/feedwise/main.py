@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from feedwise.api import analysis, articles, feeds, fetch, process, settings, sync
-from feedwise.config import get_settings
+from feedwise.config import get_settings, set_dynamic_settings
 from feedwise.models.database import init_db
 from feedwise.scheduler import create_scheduler, shutdown_scheduler
 
@@ -20,6 +20,60 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _load_dynamic_settings() -> None:
+    """从数据库加载动态配置."""
+    from feedwise.models.app_settings import AppSettings
+    from feedwise.models.database import async_session_maker
+    from sqlmodel import select
+
+    session_factory = async_session_maker()
+    async with session_factory() as session:
+        result = await session.execute(select(AppSettings))
+        db_settings = result.scalar_one_or_none()
+        if db_settings:
+            settings_dict = {
+                "llm_provider": db_settings.llm_provider,
+                "openai_api_key": db_settings.openai_api_key,
+                "openai_base_url": db_settings.openai_base_url,
+                "openai_model": db_settings.openai_model,
+                "ollama_host": db_settings.ollama_host,
+                "ollama_model": db_settings.ollama_model,
+                "freshrss_url": db_settings.freshrss_url,
+                "freshrss_username": db_settings.freshrss_username,
+                "freshrss_api_password": db_settings.freshrss_api_password,
+                "sync_interval_minutes": db_settings.sync_interval_minutes,
+                "analysis_concurrency": db_settings.analysis_concurrency,
+                "analysis_prompt_criteria": db_settings.analysis_prompt_criteria,
+            }
+            set_dynamic_settings(settings_dict)
+            logger.info("动态配置已加载")
+
+
+async def _reset_stuck_states() -> None:
+    """重置卡住的中间状态（服务重启后恢复）."""
+    from feedwise.models.database import async_session_maker
+    from sqlalchemy import text
+
+    session_factory = async_session_maker()
+    async with session_factory() as session:
+        # 重置 analyzing -> pending_analysis
+        result = await session.execute(
+            text("UPDATE articles SET process_status='pending_analysis' WHERE process_status='analyzing'")
+        )
+        analyzing_count = result.rowcount
+
+        # 重置 fetching -> pending_fetch
+        result = await session.execute(
+            text("UPDATE articles SET process_status='pending_fetch' WHERE process_status='fetching'")
+        )
+        fetching_count = result.rowcount
+
+        await session.commit()
+
+        if analyzing_count > 0 or fetching_count > 0:
+            logger.info(f"已重置卡住的状态: analyzing={analyzing_count}, fetching={fetching_count}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期管理."""
@@ -28,6 +82,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 启动时初始化
     logger.info("正在初始化数据库...")
     await init_db(app_settings.database_url)
+
+    # 加载动态配置
+    logger.info("正在加载动态配置...")
+    await _load_dynamic_settings()
+
+    # 重置卡住的中间状态
+    logger.info("正在检查并重置卡住的状态...")
+    await _reset_stuck_states()
 
     logger.info("正在启动定时任务...")
     create_scheduler(app_settings)

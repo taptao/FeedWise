@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { HomePage } from './pages/HomePage';
 import { ArticlePage } from './pages/ArticlePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { FeedStatsPage } from './pages/FeedStatsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,7 @@ function App() {
             <Route index element={<HomePage />} />
             <Route path="article/:id" element={<ArticlePage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="feed-stats" element={<FeedStatsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

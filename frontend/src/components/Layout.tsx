@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, Settings, Rss } from 'lucide-react';
+import { RefreshCw, Settings, Rss, BarChart3 } from 'lucide-react';
 import { api } from '../api/client';
 import { cn } from '../lib/utils';
 
@@ -40,6 +40,19 @@ export function Layout() {
               <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
               {syncMutation.isPending ? "同步中..." : "同步"}
             </button>
+
+            <Link
+              to="/feed-stats"
+              className={cn(
+                "inline-flex items-center justify-center rounded-md p-2",
+                "hover:bg-accent hover:text-accent-foreground",
+                "transition-colors",
+                location.pathname === '/feed-stats' && "bg-accent"
+              )}
+              title="订阅源统计"
+            >
+              <BarChart3 className="h-5 w-5" />
+            </Link>
 
             <Link
               to="/settings"

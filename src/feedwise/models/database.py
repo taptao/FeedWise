@@ -29,8 +29,111 @@ async def init_db(database_url: str) -> None:
     async with _engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
+    # 添加新列（如果不存在）
+    await _add_process_columns()
+    await _add_app_settings_columns()
+
     # 执行数据迁移
     await _migrate_process_status()
+
+
+async def _add_process_columns() -> None:
+    """添加 process_status, process_error, process_stage 列（如果不存在）."""
+    if _session_factory is None:
+        return
+
+    async with _session_factory() as session:
+        # 检查现有列
+        result = await session.execute(text("PRAGMA table_info(articles)"))
+        columns = [row[1] for row in result.fetchall()]
+
+        # 添加缺失的列
+        if "process_status" not in columns:
+            logger.info("添加 process_status 列")
+            await session.execute(
+                text(
+                    "ALTER TABLE articles ADD COLUMN process_status "
+                    "VARCHAR DEFAULT 'synced'"
+                )
+            )
+
+        if "process_error" not in columns:
+            logger.info("添加 process_error 列")
+            await session.execute(
+                text("ALTER TABLE articles ADD COLUMN process_error TEXT")
+            )
+
+        if "process_stage" not in columns:
+            logger.info("添加 process_stage 列")
+            await session.execute(
+                text("ALTER TABLE articles ADD COLUMN process_stage VARCHAR")
+            )
+
+        await session.commit()
+
+
+async def _add_app_settings_columns() -> None:
+    """添加 app_settings 表的新列（如果不存在）."""
+    if _session_factory is None:
+        return
+
+    async with _session_factory() as session:
+        # 检查现有列
+        check_sql = text("PRAGMA table_info(app_settings)")
+        result = await session.execute(check_sql)
+        columns = [row[1] for row in result.fetchall()]
+
+        if "analysis_concurrency" not in columns:
+            logger.info("添加 analysis_concurrency 列")
+            await session.execute(
+                text("ALTER TABLE app_settings ADD COLUMN analysis_concurrency INTEGER")
+            )
+            await session.commit()
+
+        if "analysis_prompt_criteria" not in columns:
+            logger.info("添加 analysis_prompt_criteria 列")
+            await session.execute(
+                text("ALTER TABLE app_settings ADD COLUMN analysis_prompt_criteria TEXT")
+            )
+            await session.commit()
+
+        # 检查 articles 表的 full_content_html 列
+        check_articles_sql = text("PRAGMA table_info(articles)")
+        result = await session.execute(check_articles_sql)
+        article_columns = [row[1] for row in result.fetchall()]
+
+        if "full_content_html" not in article_columns:
+            logger.info("添加 full_content_html 列")
+            await session.execute(
+                text("ALTER TABLE articles ADD COLUMN full_content_html TEXT")
+            )
+            await session.commit()
+
+        if "user_rating" not in article_columns:
+            logger.info("添加 user_rating 列")
+            await session.execute(
+                text("ALTER TABLE articles ADD COLUMN user_rating INTEGER")
+            )
+            await session.commit()
+
+        # 检查 feeds 表的 likes_count 和 dislikes_count 列
+        check_feeds_sql = text("PRAGMA table_info(feeds)")
+        result = await session.execute(check_feeds_sql)
+        feed_columns = [row[1] for row in result.fetchall()]
+
+        if "likes_count" not in feed_columns:
+            logger.info("添加 likes_count 列")
+            await session.execute(
+                text("ALTER TABLE feeds ADD COLUMN likes_count INTEGER DEFAULT 0")
+            )
+            await session.commit()
+
+        if "dislikes_count" not in feed_columns:
+            logger.info("添加 dislikes_count 列")
+            await session.execute(
+                text("ALTER TABLE feeds ADD COLUMN dislikes_count INTEGER DEFAULT 0")
+            )
+            await session.commit()
 
 
 async def _migrate_process_status() -> None:
@@ -39,6 +142,15 @@ async def _migrate_process_status() -> None:
         return
 
     async with _session_factory() as session:
+        # 先检查 process_status 列是否存在
+        check_column_sql = text("PRAGMA table_info(articles)")
+        result = await session.execute(check_column_sql)
+        columns = [row[1] for row in result.fetchall()]
+
+        if "process_status" not in columns:
+            logger.info("process_status 列不存在，跳过迁移")
+            return
+
         # 检查是否需要迁移（查找 process_status 为 synced 但 fetch_status 不为空的记录）
         check_sql = text("""
             SELECT COUNT(*) FROM articles

@@ -25,11 +25,13 @@ router = APIRouter(prefix="/api/process", tags=["process"])
 async def get_stats(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, int]:
-    """获取处理统计."""
+    """获取处理统计 - 流水线阶段."""
     stats = await get_process_stats(session)
     return {
-        "pending": stats.pending,
-        "processing": stats.processing,
+        "synced": stats.synced,
+        "fetching": stats.fetching,
+        "pending_analysis": stats.pending_analysis,
+        "analyzing": stats.analyzing,
         "done": stats.done,
         "failed": stats.failed,
         "total": stats.total,

@@ -17,7 +17,8 @@ class Article(SQLModel, table=True):
     url: str | None = Field(default=None, description="原文链接")
     content: str | None = Field(default=None, description="HTML 内容")
     content_text: str | None = Field(default=None, description="纯文本内容")
-    full_content: str | None = Field(default=None, description="抓取的全文内容")
+    full_content: str | None = Field(default=None, description="抓取的全文内容(纯文本)")
+    full_content_html: str | None = Field(default=None, description="抓取的全文内容(HTML)")
     content_source: str = Field(default="feed", description="内容来源: feed|fetched")
     fetch_status: str | None = Field(
         default=None,
@@ -37,3 +38,6 @@ class Article(SQLModel, table=True):
     )
     is_read: bool = Field(default=False, description="是否已读")
     is_starred: bool = Field(default=False, description="是否收藏")
+    user_rating: int | None = Field(
+        default=None, description="用户评价: 1=喜欢, -1=不喜欢, None=未评价"
+    )

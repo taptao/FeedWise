@@ -1,33 +1,36 @@
 """文章分析器."""
 
 import json
+import re
 from collections.abc import AsyncIterator
 
 from pydantic import BaseModel
 
 from feedwise.llm.base import LLMProvider, Message
 
-SYSTEM_PROMPT = """你是一个专业的文章分析助手，擅长快速理解和评估文章价值。
+DEFAULT_CRITERIA = """## 价值评分标准 (1-10)
+- 9-10: 突破性内容、重大新闻、深度原创分析
+- 7-8: 高质量技术文章、有价值的见解
+- 5-6: 一般性信息、常规更新
+- 3-4: 旧闻、重复内容、广告软文
+- 1-2: 垃圾内容、无实质内容"""
+
+SYSTEM_PROMPT_TEMPLATE = """你是一个专业的文章分析助手，擅长快速理解和评估文章价值。
 
 ## 任务
 分析用户提供的文章，返回结构化的分析结果。
 
 ## 输出格式（严格 JSON）
-{
+{{
   "summary": "2-3句话的文章摘要，使用文章原语言",
   "key_points": ["要点1", "要点2", "要点3"],
   "value_score": 7.5,
   "reading_time": 5,
   "language": "zh",
   "tags": ["技术", "AI", "趋势"]
-}
+}}
 
-## 价值评分标准 (1-10)
-- 9-10: 突破性内容、重大新闻、深度原创分析
-- 7-8: 高质量技术文章、有价值的见解
-- 5-6: 一般性信息、常规更新
-- 3-4: 旧闻、重复内容、广告软文
-- 1-2: 垃圾内容、无实质内容
+{criteria}
 
 ## 注意事项
 - 摘要使用文章原语言
@@ -60,8 +63,9 @@ class AnalysisResult(BaseModel):
 class ArticleAnalyzer:
     """文章分析器."""
 
-    def __init__(self, provider: LLMProvider) -> None:
+    def __init__(self, provider: LLMProvider, criteria: str | None = None) -> None:
         self.provider = provider
+        self.criteria = criteria or DEFAULT_CRITERIA
 
     async def analyze(
         self,
@@ -99,6 +103,9 @@ class ArticleAnalyzer:
         if len(content) > max_content_length:
             content = content[:max_content_length] + "\n\n[内容已截断...]"
 
+        # 构建 system prompt
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(criteria=self.criteria)
+
         user_content = USER_PROMPT_TEMPLATE.format(
             title=title,
             feed_name=feed_name or "未知来源",
@@ -106,13 +113,18 @@ class ArticleAnalyzer:
         )
 
         return [
-            Message(role="system", content=SYSTEM_PROMPT),
+            Message(role="system", content=system_prompt),
             Message(role="user", content=user_content),
         ]
 
     def _parse_response(self, response: str) -> AnalysisResult:
         """解析 LLM 响应."""
+
         # 尝试提取 JSON
+        response = response.strip()
+
+        # 移除 <think>...</think> 标签（qwen3 模型的思考过程）
+        response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
         response = response.strip()
 
         # 移除可能的 markdown 代码块标记

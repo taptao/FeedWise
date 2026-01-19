@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpDown } from 'lucide-react';
+import { ArrowUpDown, Tag, X } from 'lucide-react';
 import { api } from '../api/client';
 import { ArticleCard } from '../components/ArticleCard';
 import { Sidebar } from '../components/Sidebar';
@@ -14,16 +14,23 @@ export function HomePage() {
   const [sort, setSort] = useState<SortOption>('value');
   const [filter, setFilter] = useState<FilterOption>('unread');
   const [selectedFeed, setSelectedFeed] = useState<string | null>(null);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['articles', { sort, filter, feed_id: selectedFeed, page }],
-    queryFn: () => api.articles.list({ sort, filter, feed_id: selectedFeed || undefined, page, limit: 20 }),
+    queryKey: ['articles', { sort, filter, feed_id: selectedFeed, tag: selectedTag, page }],
+    queryFn: () => api.articles.list({ sort, filter, feed_id: selectedFeed || undefined, tag: selectedTag || undefined, page, limit: 20 }),
+  });
+
+  const { data: tagsData } = useQuery({
+    queryKey: ['tags'],
+    queryFn: () => api.articles.tags(),
   });
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['articles'] });
+    queryClient.invalidateQueries({ queryKey: ['tags'] });
   };
 
   const sortOptions: { value: SortOption; label: string }[] = [
@@ -84,6 +91,33 @@ export function HomePage() {
             </div>
           </div>
         </div>
+
+        {/* Tag Filter */}
+        {tagsData && tagsData.tags.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Tag className="h-4 w-4 text-muted-foreground" />
+            {selectedTag && (
+              <button
+                onClick={() => setSelectedTag(null)}
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-primary text-primary-foreground rounded-full"
+              >
+                {selectedTag}
+                <X className="h-3 w-3" />
+              </button>
+            )}
+            {tagsData.tags.slice(0, 15).map((tag) => (
+              tag.name !== selectedTag && (
+                <button
+                  key={tag.name}
+                  onClick={() => setSelectedTag(tag.name)}
+                  className="px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-full transition-colors"
+                >
+                  {tag.name} ({tag.count})
+                </button>
+              )
+            ))}
+          </div>
+        )}
 
         {/* Loading State */}
         {isLoading && (

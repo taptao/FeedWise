@@ -40,12 +40,14 @@ class ProcessStatus:
 
 @dataclass
 class ProcessStats:
-    """处理统计."""
+    """处理统计 - 流水线阶段."""
 
-    pending: int = 0
-    processing: int = 0
-    done: int = 0
-    failed: int = 0
+    synced: int = 0  # 已同步，待抓取
+    fetching: int = 0  # 抓取中
+    pending_analysis: int = 0  # 待分析
+    analyzing: int = 0  # 分析中
+    done: int = 0  # 已完成
+    failed: int = 0  # 失败
     total: int = 0
 
 
@@ -66,6 +68,26 @@ class ProcessProgress:
 _ws_connections: set["WebSocket"] = set()
 _engine: "ProcessEngine | None" = None
 _progress = ProcessProgress()
+_analysis_semaphore: asyncio.Semaphore | None = None  # 分析并发控制
+
+
+def get_analysis_semaphore() -> asyncio.Semaphore:
+    """获取分析信号量（懒加载）."""
+    global _analysis_semaphore
+    if _analysis_semaphore is None:
+        from feedwise.config import get_effective_setting
+
+        concurrency = get_effective_setting("analysis_concurrency")
+        limit = int(concurrency) if concurrency else 1
+        _analysis_semaphore = asyncio.Semaphore(limit)
+        logger.info(f"分析并发限制: {limit}")
+    return _analysis_semaphore
+
+
+def reset_analysis_semaphore() -> None:
+    """重置信号量（配置变更时调用）."""
+    global _analysis_semaphore
+    _analysis_semaphore = None
 
 
 def get_engine() -> "ProcessEngine | None":
@@ -322,6 +344,9 @@ class ProcessEngine:
 
         if result.success and result.content:
             article.full_content = result.content
+            # 保存 HTML 版本（如果有）
+            if result.content_html:
+                article.full_content_html = result.content_html
             article.content_source = "fetched"
             article.fetch_status = "success"
             article.process_status = ProcessStatus.PENDING_ANALYSIS
@@ -380,129 +405,183 @@ class ProcessEngine:
             logger.info(f"跳过分析 (无内容): {article.title}")
             return
 
-        try:
-            # 创建 LLM Provider
-            settings = get_settings()
-            provider = create_llm_provider(settings)
-            analyzer = ArticleAnalyzer(provider)
+        # 使用信号量控制并发
+        semaphore = get_analysis_semaphore()
+        async with semaphore:
+            try:
+                # 创建 LLM Provider（使用动态配置）
+                from feedwise.config import get_effective_setting
 
-            # 执行分析
-            result = await analyzer.analyze(
-                title=article.title,
-                content=content,
-                feed_name="",
-            )
-
-            # 检查是否已有分析结果
-            stmt = select(ArticleAnalysis).where(
-                ArticleAnalysis.article_id == article.id
-            )
-            existing_result = await session.execute(stmt)
-            existing = existing_result.scalar_one_or_none()
-
-            model_name = (
-                settings.openai_model
-                if settings.llm_provider == "openai"
-                else settings.ollama_model
-            )
-
-            if existing:
-                existing.summary = result.summary
-                existing.key_points = json.dumps(result.key_points, ensure_ascii=False)
-                existing.value_score = result.value_score
-                existing.reading_time = result.reading_time
-                existing.language = result.language
-                existing.tags = json.dumps(result.tags, ensure_ascii=False)
-                existing.model_used = model_name
-            else:
-                analysis = ArticleAnalysis(
-                    article_id=article.id,
-                    summary=result.summary,
-                    key_points=json.dumps(result.key_points, ensure_ascii=False),
-                    value_score=result.value_score,
-                    reading_time=result.reading_time,
-                    language=result.language,
-                    tags=json.dumps(result.tags, ensure_ascii=False),
-                    model_used=model_name,
+                settings = get_settings()
+                llm_provider = str(
+                    get_effective_setting("llm_provider") or settings.llm_provider
                 )
-                session.add(analysis)
+                ollama_host = str(
+                    get_effective_setting("ollama_host") or settings.ollama_host
+                )
+                ollama_model = str(
+                    get_effective_setting("ollama_model") or settings.ollama_model
+                )
 
-            article.process_status = ProcessStatus.DONE
-            _progress.completed += 1
-            logger.info(f"分析完成: {article.title}")
+                if llm_provider == "ollama":
+                    from feedwise.llm.base import LLMConfig
+                    from feedwise.llm.ollama import OllamaProvider
 
-            await broadcast(
-                {
-                    "type": "item_done",
-                    "data": {
-                        "article_id": article.id,
-                        "title": article.title,
-                    },
-                }
-            )
+                    config = LLMConfig(model=ollama_model)
+                    provider = OllamaProvider(config=config, host=ollama_host)
+                else:
+                    provider = create_llm_provider(settings)
 
-        except Exception as e:
-            article.process_status = ProcessStatus.FAILED
-            article.process_stage = "analysis"
-            article.process_error = str(e)
-            _progress.failed += 1
-            logger.exception(f"分析失败: {article.title}")
+                # 获取自定义评分标准
+                criteria = get_effective_setting("analysis_prompt_criteria")
+                analyzer = ArticleAnalyzer(
+                    provider, criteria=str(criteria) if criteria else None
+                )
 
-            await broadcast(
-                {
-                    "type": "item_failed",
-                    "data": {
-                        "article_id": article.id,
-                        "title": article.title,
-                        "stage": "analysis",
-                        "error": str(e),
-                    },
-                }
-            )
+                # 执行分析
+                result = await analyzer.analyze(
+                    title=article.title,
+                    content=content,
+                    feed_name="",
+                )
 
-        await session.commit()
+                # 检查是否已有分析结果
+                stmt = select(ArticleAnalysis).where(
+                    ArticleAnalysis.article_id == article.id
+                )
+                existing_result = await session.execute(stmt)
+                existing = existing_result.scalar_one_or_none()
+
+                model_name = (
+                    settings.openai_model if llm_provider == "openai" else ollama_model
+                )
+
+                if existing:
+                    existing.summary = result.summary
+                    existing.key_points = json.dumps(
+                        result.key_points, ensure_ascii=False
+                    )
+                    existing.value_score = result.value_score
+                    existing.reading_time = result.reading_time
+                    existing.language = result.language
+                    existing.tags = json.dumps(result.tags, ensure_ascii=False)
+                    existing.model_used = model_name
+                else:
+                    analysis = ArticleAnalysis(
+                        article_id=article.id,
+                        summary=result.summary,
+                        key_points=json.dumps(result.key_points, ensure_ascii=False),
+                        value_score=result.value_score,
+                        reading_time=result.reading_time,
+                        language=result.language,
+                        tags=json.dumps(result.tags, ensure_ascii=False),
+                        model_used=model_name,
+                    )
+                    session.add(analysis)
+
+                article.process_status = ProcessStatus.DONE
+                _progress.completed += 1
+                logger.info(f"分析完成: {article.title}")
+
+                await broadcast(
+                    {
+                        "type": "item_done",
+                        "data": {
+                            "article_id": article.id,
+                            "title": article.title,
+                        },
+                    }
+                )
+
+            except Exception as e:
+                # 提取更详细的错误信息
+                error_type = type(e).__name__
+                error_msg = str(e)
+                if "ConnectTimeout" in error_type or "timeout" in error_msg.lower():
+                    detailed_error = "连接超时 - Ollama 服务可能未响应"
+                elif (
+                    "ConnectionError" in error_type or "connection" in error_msg.lower()
+                ):
+                    detailed_error = "连接失败 - 无法连接到 LLM 服务"
+                elif "JSONDecodeError" in error_type or "json" in error_msg.lower():
+                    detailed_error = "JSON 解析失败 - LLM 返回格式错误"
+                else:
+                    detailed_error = f"{error_type}: {error_msg[:100]}"
+
+                article.process_status = ProcessStatus.FAILED
+                article.process_stage = "analysis"
+                article.process_error = detailed_error
+                _progress.failed += 1
+                logger.exception(f"分析失败: {article.title}")
+
+                await broadcast(
+                    {
+                        "type": "item_failed",
+                        "data": {
+                            "article_id": article.id,
+                            "title": article.title,
+                            "stage": "analysis",
+                            "error": detailed_error,
+                        },
+                    }
+                )
+
+            await session.commit()
 
 
 async def get_process_stats(session: AsyncSession) -> ProcessStats:
-    """获取处理统计."""
+    """获取处理统计 - 按流水线阶段."""
     stats = ProcessStats()
 
-    # pending: synced + pending_fetch + pending_analysis
-    pending_stmt = select(Article).where(
+    # synced: 已同步，待抓取
+    synced_stmt = select(Article).where(
         Article.process_status.in_(  # type: ignore[union-attr]
-            [
-                ProcessStatus.SYNCED,
-                ProcessStatus.PENDING_FETCH,
-                ProcessStatus.PENDING_ANALYSIS,
-            ]
+            [ProcessStatus.SYNCED, ProcessStatus.PENDING_FETCH]
         )
     )
-    pending_result = await session.execute(pending_stmt)
-    stats.pending = len(pending_result.scalars().all())
+    synced_result = await session.execute(synced_stmt)
+    stats.synced = len(synced_result.scalars().all())
 
-    # processing: fetching + analyzing
-    processing_stmt = select(Article).where(
-        Article.process_status.in_(  # type: ignore[union-attr]
-            [
-                ProcessStatus.FETCHING,
-                ProcessStatus.ANALYZING,
-            ]
-        )
+    # fetching: 抓取中
+    fetching_stmt = select(Article).where(
+        Article.process_status == ProcessStatus.FETCHING
     )
-    processing_result = await session.execute(processing_stmt)
-    stats.processing = len(processing_result.scalars().all())
+    fetching_result = await session.execute(fetching_stmt)
+    stats.fetching = len(fetching_result.scalars().all())
 
-    # done
+    # pending_analysis: 待分析
+    pending_analysis_stmt = select(Article).where(
+        Article.process_status == ProcessStatus.PENDING_ANALYSIS
+    )
+    pending_analysis_result = await session.execute(pending_analysis_stmt)
+    stats.pending_analysis = len(pending_analysis_result.scalars().all())
+
+    # analyzing: 分析中
+    analyzing_stmt = select(Article).where(
+        Article.process_status == ProcessStatus.ANALYZING
+    )
+    analyzing_result = await session.execute(analyzing_stmt)
+    stats.analyzing = len(analyzing_result.scalars().all())
+
+    # done: 已完成
     done_stmt = select(Article).where(Article.process_status == ProcessStatus.DONE)
     done_result = await session.execute(done_stmt)
     stats.done = len(done_result.scalars().all())
 
-    # failed
+    # failed: 失败
     failed_stmt = select(Article).where(Article.process_status == ProcessStatus.FAILED)
     failed_result = await session.execute(failed_stmt)
     stats.failed = len(failed_result.scalars().all())
 
-    stats.total = stats.pending + stats.processing + stats.done + stats.failed
+    stats.total = (
+        stats.synced
+        + stats.fetching
+        + stats.pending_analysis
+        + stats.analyzing
+        + stats.done
+        + stats.failed
+    )
+
     return stats
 
 

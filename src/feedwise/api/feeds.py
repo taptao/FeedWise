@@ -36,6 +36,8 @@ async def list_feeds(
                 "icon_url": feed.icon_url,
                 "priority": feed.priority,
                 "fetch_full_text": feed.fetch_full_text,
+                "likes_count": feed.likes_count,
+                "dislikes_count": feed.dislikes_count,
             }
         )
 
@@ -64,6 +66,8 @@ async def get_feed(
         "category": feed.category,
         "priority": feed.priority,
         "fetch_full_text": feed.fetch_full_text,
+        "likes_count": feed.likes_count,
+        "dislikes_count": feed.dislikes_count,
         "created_at": feed.created_at.isoformat(),
         "updated_at": feed.updated_at.isoformat(),
     }
@@ -101,3 +105,31 @@ async def set_fetch_mode(
     await session.commit()
 
     return {"id": feed_id, "fetch_full_text": mode}
+
+
+@router.get("/stats/ratings")
+async def get_feeds_ratings(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """获取所有 Feed 的喜欢/不喜欢统计."""
+    stmt = select(Feed).order_by(
+        (Feed.likes_count - Feed.dislikes_count).desc(),
+        Feed.likes_count.desc(),
+    )
+    result = await session.execute(stmt)
+    feeds = result.scalars().all()
+
+    return {
+        "feeds": [
+            {
+                "id": feed.id,
+                "title": feed.title,
+                "icon_url": feed.icon_url,
+                "category": feed.category,
+                "likes_count": feed.likes_count,
+                "dislikes_count": feed.dislikes_count,
+                "score": feed.likes_count - feed.dislikes_count,
+            }
+            for feed in feeds
+        ],
+    }
